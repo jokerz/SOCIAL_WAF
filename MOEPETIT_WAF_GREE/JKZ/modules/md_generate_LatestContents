@@ -1,0 +1,80 @@
+#!/usr/bin/perl
+
+#******************************************************
+# @desc		新着コンテンツの生成モジュール
+#           これは物品賞品などの新着
+#			OBJECTには配列で格納
+#			[contents_id, lastupdate_date(最終更新日), category_name, tmplt_id, ]
+# @package	generateLatest
+# @author	Iwahase Ryo
+# @create	2010/10/04
+# @version	
+#******************************************************
+
+use strict;
+use vars qw($include_path $cfg);
+
+BEGIN {
+    ## クラスのインクルードパスを取得するための処理
+    require Cwd;
+    my $pwd = Cwd::getcwd();
+    ($include_path = $pwd) =~ s!/modules!!;
+    unshift @INC, $include_path;
+    unshift @INC, $include_path . '/lib';
+require Data::Dumper;
+warn "="x20,"\n", map{$_,"\n" } @INC;#$include_path;
+    my $config = sprintf("%s/conf/envconf.cfg",$include_path);
+
+    require MyClass::Config;
+    $cfg = MyClass::Config->new($config);
+
+}
+
+use MyClass::UsrWebDB;
+use MyClass::WebUtil;
+
+
+#*******************************
+# cronで1日一回実行させる。
+# テーブル：ダウンロードカウンターからコンテンツのカテゴリ別に集計（上位３つ）
+# 集計してデータをシリアライズして保存
+#*******************************
+
+## シリアライズしたデータの場所
+my $publishdir              = $include_path . '/publish/contents';
+# 新着コンテンツ
+my $LatestContentsFile      = $publishdir . '/latestContents.obj';
+# 新着コンテンツのなかでサイトトップに表示するもの
+my $LatestContentsOnTopFile = $publishdir . '/latestContentsOnTop.obj';
+
+my $sql = "SELECT p.contents_id, p.name, p.contentsimage_id
+ FROM tContentsM p
+ WHERE p.latest_flag & ? AND p.status_flag=2
+ ORDER BY p.contents_id DESC
+";
+
+my $dbh = MyClass::UsrWebDB::connect({
+              dbaccount => $cfg->param('DATABASE_USER'),
+              dbpasswd  => $cfg->param('DATABASE_PASSWORD'),
+              dbname    => $cfg->param('DATABASE_NAME'),
+          });
+$dbh->do('set names sjis');
+
+
+my $aryref1 = $dbh->selectall_arrayref($sql, undef, 4);
+$sql .= " LIMIT 4";
+my $aryref2 = $dbh->selectall_arrayref($sql, undef, 6);
+
+
+$dbh->disconnect();
+
+eval {
+    MyClass::WebUtil::publishObj({ file=>$LatestContentsOnTopFile, obj=>$aryref1 });
+    MyClass::WebUtil::publishObj({ file=>$LatestContentsFile, obj=>$aryref2 });
+};
+if ($@) {
+    print " FAIL CREATING OBJECT $@ \n";
+}
+
+
+exit();

@@ -1,0 +1,73 @@
+#**************************
+#
+# 画像表示スクリプト(画像を縮小表示する)
+# 図鑑作成時の画像選択時用に画像をリアルタイムで縮小
+# serveResizeContentsImageDB.mpl
+# @access    public
+# @author    Iwahase Ryo
+# @create    2011/05/02
+#**************************
+use strict;
+use vars qw($cfg);
+
+BEGIN {
+    my $config = $ENV{'MOEPETIT_CONFIG'};
+    require MyClass::Config;
+    $cfg = MyClass::Config->new($config);
+}
+
+use CGI;
+use MyClass::UsrWebDB;
+
+my $namespace   = $cfg->param('WAF_NAME_SPACE') . 'ContentsImageData';
+my $q           = CGI->new();
+
+## このパラメータが指定された場合、値は何でもよいけど120x160のサイズの画像を生成
+my $s           = $q->param('s') || undef;
+my ($contents_id, $category_id) = split(/:/, $q->param('p'));
+
+
+my $col_name    = (defined($s)) ? 'image' : 'resized_image';
+my $scale       = $col_name eq 'image' ? "120x160" : "28x37";
+
+my $key         = join (';', (int($contents_id), int($category_id), $scale));
+my $memcached   = MyClass::UsrWebDB::MemcacheInit();
+my $obj         = $memcached->get("$namespace:$key");
+
+if(!$obj) {
+	my $dbh = MyClass::UsrWebDB::connect({
+                 dbaccount => $cfg->param('DATABASE_USER'),
+                 dbpasswd  => $cfg->param('DATABASE_PASSWORD'),
+                 dbname    => $cfg->param('DATABASE_NAME'),
+              });
+
+    $dbh->do ('set names utf8');
+
+    my $sql                      = sprintf("SELECT mime_type, %s FROM %s.tContentsImageM WHERE contentsm_id=? AND categorym_id = ?;", $col_name, $cfg->param('DATABASE_NAME'));
+    my ($mime_type, $image_data) = $dbh->selectrow_array ($sql, undef, $contents_id, $category_id);
+    $dbh->disconnect();
+
+    require Image::Magick;
+    my $img = Image::Magick->new();
+    my $err = $img->BlobToImage($image_data);
+    $img->Scale(geometry => $scale);
+
+    $obj->{image_data} = $img->ImageToBlob();
+    $obj->{mime_type}  =  $mime_type;
+
+    undef $img;
+
+    #$obj = {
+    #mime_type => $mime_type,
+    #image_data=> $image_data,
+    #};
+	$memcached->add("$namespace:$key", $obj, 3600);
+}
+
+
+print $q->header(-type=>$obj->{mime_type},-Content_Length=>length ($obj->{image_data}));
+print $obj->{image_data};
+
+ModPerl::Util::exit();
+
+__END__

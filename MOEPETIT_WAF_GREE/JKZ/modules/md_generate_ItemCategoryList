@@ -1,0 +1,89 @@
+#!/usr/bin/perl
+
+#******************************************************
+# @desc        アイテムカテゴリリストオブジェクトの生成モジュール
+#            OBJECTには配列で格納
+#            categorym_id    subcategory_id
+#            [
+#                            [
+#                                        { item_categorym_id
+#                                          item_category_name
+#											item_category_warning
+#                                          status_flag
+#                                         },
+#                            ],
+#            ],
+#
+# @package    md_generate_ItemCategoryList
+# @author    Iwahase Ryo
+# @create    2010/03/31
+# @version    
+#******************************************************
+
+use strict;
+use vars qw($include_path $cfg);
+
+BEGIN {
+    ## クラスのインクルードパスを取得するための処理
+    require Cwd;
+    my $pwd = Cwd::getcwd();
+    ($include_path = $pwd) =~ s!/modules!!;
+    unshift @INC, $include_path;
+
+    my $config = sprintf("%s/conf/envconf.cfg",$include_path);
+
+    require MyClass::Config;
+    $cfg = MyClass::Config->new($config);
+
+}
+
+use MyClass::UsrWebDB;
+use MyClass::WebUtil;
+
+#*******************************
+# cronで1日一回実行させる。
+# 集計してデータをシリアライズして保存
+#*******************************
+
+## シリアライズしたデータオブジェクト
+my $item_category_objectfile                      = $cfg->param('ITEMCATEGORYLIST_OBJ');
+
+my $dbh = MyClass::UsrWebDB::connect({
+              dbaccount => $cfg->param('DATABASE_USER'),
+              dbpasswd  => $cfg->param('DATABASE_PASSWORD'),
+              dbname    => $cfg->param('DATABASE_NAME'),
+          });
+$dbh->do('set names sjis');
+
+my $sql;
+my $aryref;
+my $obj_c;
+
+my @reportsql;
+
+## カテゴリから開始
+$sql    = "SELECT item_category_id, item_category_name, item_category_description, item_category_warning, status_flag FROM tItemCategoryM;";
+$aryref = $dbh->selectall_arrayref($sql, { Columns => {} });
+
+foreach (@{$aryref}) {
+    $obj_c->[$_->{item_category_id}]->{item_category_id}          = $_->{item_category_id};
+    $obj_c->[$_->{item_category_id}]->{item_category_name}        = $_->{item_category_name};
+    $obj_c->[$_->{item_category_id}]->{item_category_description} = $_->{item_category_description};
+    $obj_c->[$_->{item_category_id}]->{item_category_warning} = $_->{item_category_warning};
+    $obj_c->[$_->{item_category_id}]->{status_flag}               = $_->{status_flag};
+}
+
+push(@reportsql, $sql);
+
+
+$dbh->disconnect();
+
+eval {
+    MyClass::WebUtil::publishObj({ file=> $item_category_objectfile, obj=>$obj_c });
+};
+
+if ($@) {
+    warn " Fail Creating Object files $@ \n";
+}
+
+exit();

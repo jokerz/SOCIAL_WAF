@@ -1,0 +1,11 @@
+---
+plugins:
+  - module: Ichi
+    config:
+       msg: location plugin
+       enable: Y
+  - module: RTBanner
+    config:
+       msg: Rotation Banner plugin
+       enable: Y
+

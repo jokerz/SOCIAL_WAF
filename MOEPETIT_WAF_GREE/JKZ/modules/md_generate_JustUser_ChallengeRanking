@@ -1,0 +1,162 @@
+#!/usr/bin/perl
+
+#******************************************************
+# @desc      JustUserと挑戦ランキング生成
+#            OBJECTには配列で格納
+#            ●flashgameJustUser.obj
+#            { 
+#                justuser_gree_user_id
+#                justuser_getimage_id
+#                justuser_contents_name
+#                categorym_id
+#            }
+#            ●getimageUserRanking.obj obj->[ランク]->{key} 0から順
+#            [
+#				{
+#					getimagerankuser_gree_user_id
+#					getimagerankuser_my_getimage_total
+#				}
+#            ]
+#            
+#
+# @package   md_generate_JustUser_ChallengeRanking
+# @author    Iwahase Ryo
+# @create    2011/04/30
+# @version    
+#******************************************************
+
+use strict;
+use vars qw($include_path $cfg);
+
+BEGIN {
+    ## クラスのインクルードパスを取得するための処理
+    require Cwd;
+    my $pwd = Cwd::getcwd();
+    ($include_path = $pwd) =~ s!/modules!!;
+    unshift @INC, $include_path;
+
+    my $config = sprintf("%s/conf/envconf.cfg",$include_path);
+
+    require MyClass::Config;
+    $cfg = MyClass::Config->new($config);
+
+}
+
+use MyClass::UsrWebDB;
+use MyClass::WebUtil;
+
+#*******************************
+# cronで1日一回実行させる。
+# 集計してデータをシリアライズして保存
+#*******************************
+
+## シリアライズしたデータオブジェクト
+my $justuser_objectfile            = $cfg->param('FLASHGAME_JUST_USER_OBJ');
+my $getimage_useranking_objectfile = $cfg->param('GETIMAGE_USERRANKING_OBJ');
+
+
+my $dbh = MyClass::UsrWebDB::connect({
+              dbaccount => $cfg->param('DATABASE_USER'),
+              dbpasswd  => $cfg->param('DATABASE_PASSWORD'),
+              dbname    => $cfg->param('DATABASE_NAME'),
+          });
+$dbh->do('set names sjis');
+
+my $sql;
+my $aryref;
+my $obj_j;
+my $obj_c;
+
+my @reportsql;
+
+
+## just userから開始
+#$sql    = "SELECT MAX(l.registration_date), l.gree_user_id AS justuser_gree_user_id
+# FROM tGsaUserFlashGameLogF l, tGsaMemberM m
+# WHERE l.gree_user_id=m.gree_user_id AND m.status_flag IN(1,2) AND l.result_flag=2 ORDER BY l.registration_date desc LIMIT 1;";
+
+# Modified 2011/05/10 ゲットした画像idも取得するように変更
+$sql    = "SELECT
+ l.gree_user_id AS justuser_gree_user_id, l.gree_user_nickname AS justuser_nickname,
+ CONCAT(l.contentsm_id, ':', l.categorym_id) AS justuser_getimage_id,
+ l.contents_name AS justuser_contents_name,
+ l.categorym_id
+ FROM tGsaUserFlashGameLogF l, tGsaMemberM m
+ WHERE l.gree_user_id=m.gree_user_id AND m.status_flag=2 AND l.result_flag=2 ORDER BY l.registration_date DESC LIMIT 1;";
+
+$aryref = $dbh->selectall_arrayref($sql, { Columns => {} });
+#print scalar @{ $aryref };#"\n";
+#print $#{$aryref},"\n --- \n";
+#print $aryref->[0]->{justuser_gree_user_id},"\n --- \n";
+if (0 <= $#{ $aryref }) {
+#if ($aryref->[0]->{justuser_gree_user_id} ne "" || $aryref->[0]->{justuser_gree_user_id} ne 'NULL') {
+## １レコード
+    map { $obj_j->{$_} = $aryref->[0]->{$_} } keys %{ $aryref->[0] };
+    eval {
+        MyClass::WebUtil::publishObj({ file=>$justuser_objectfile, obj=>$obj_j });
+    };
+    if ($@) { warn "pussy \n \n"; }
+    push(@reportsql, $sql);
+}
+
+
+=pod
+## just userから開始
+$sql    = "SELECT MAX(l.registration_date), l.gree_user_id AS justuser_gree_user_id, l.contentsm_id AS justuser_contentsm_id, l.record_time AS justuser_record_time, l.gree_user_nickname AS justuser_nickname
+ FROM tGsaUserFlashGameLogF l
+ WHERE l.result_flag=2;";
+
+$aryref = $dbh->selectall_arrayref($sql, { Columns => {} });
+print $#{$aryref},"\n --- \n";
+if (0 <= $#{ $aryref }) {
+## １レコード
+map { $obj_j->{$_} = $aryref->[0]->{$_} } keys %{ $aryref->[0] };
+eval {
+    MyClass::WebUtil::publishObj({ file=>$justuser_objectfile, obj=>$obj_j });
+};
+if ($@) { warn "pussy \n \n"; }
+push(@reportsql, $sql);
+}
+=cut
+
+
+## ｹﾞｯﾄ画像枚数ランキング (トップ20)
+#$sql    = "SELECT gree_user_id, my_getimage_total
+# FROM tGsaUserStatusM
+# ORDER BY my_getimage_total DESC LIMIT 5;";
+
+#$sql = "SELECT gree_user_id, COUNT(gree_user_id) AS my_getimage_total
+#FROM tGsaUserFlashGameLogF
+# WHERE result_flag=2 GROUP BY gree_user_id
+# ORDER BY my_getimage_total DESC LIMIT 20;";
+
+# Modified 2011/05/09
+$sql = "SELECT g.gree_user_id, gree_user_nickname, COUNT(g.gree_user_id) AS my_getimage_total
+FROM tGsaUserFlashGameLogF g, tGsaMemberM m
+ WHERE g.gree_user_id=m.gree_user_id AND m.status_flag IN(1,2) AND g.result_flag=2 GROUP BY g.gree_user_id
+ ORDER BY my_getimage_total DESC LIMIT 20;";
+
+
+
+$aryref = $dbh->selectall_arrayref($sql, { Columns => {} });
+if (0 > $#{ $aryref }) { exit; }
+map {
+    $obj_c->[$_]->{getimagerankuser_gree_user_id}      = $aryref->[$_]->{gree_user_id};
+    $obj_c->[$_]->{getimagerankuser_gree_user_nickname} = $aryref->[$_]->{gree_user_nickname};
+    $obj_c->[$_]->{getimagerankuser_my_getimage_total} = $aryref->[$_]->{my_getimage_total};
+} 0..$#{ $aryref };
+
+
+push(@reportsql, $sql);
+
+$dbh->disconnect();
+
+eval {
+    MyClass::WebUtil::publishObj({ file=>$getimage_useranking_objectfile, obj=>$obj_c });
+};
+
+if ($@) {
+    warn " Fail Creating Object files $@ \n";
+}
+
+exit();

@@ -1,0 +1,139 @@
+#!/usr/bin/perl
+#***************************************
+# @desc JKZフレームワークのDBサブクラス生成
+# @author    Iwahase Ryo
+# @create    2008/04/08
+# @update    2009/01/22 このプログラムの設置場所をフレームワークのextlibないに変更
+# @update    2009/01/22 初期処理を追加
+# @update    2009/01/22 MODEL格納ディレクトリを定数に設定
+# @update    2009/02/10 PrimaryKey とne !=の自動設定 
+#            バージョンアップ
+# @update    2009/02/12 リスティング処理も追加してJKZDBListクラスの削除
+# @update    2009/06/01 不要であるTerm::ANSIColorを削除
+# @update    2009/09/29 1.30にバージョンアップ
+# @update    2010/04/02 
+# @version    1.00
+# @version    1.02
+# @version    1.30
+#***************************************
+use vars qw($cfg);
+BEGIN {
+    ## クラスのインクルードパスを取得するための処理
+    require Cwd;
+    my $pwd = Cwd::getcwd();
+    (my $include_path = $pwd) =~ s!/extlib/bin!!;
+
+    unshift @INC, $include_path;
+    my $config = sprintf("%s/conf/envconf.cfg",$include_path);
+
+    require MyClass::Config;
+    $cfg = MyClass::Config->new($config);
+
+}
+
+
+use MyClass::UsrWebDB;
+use Time::HiRes qw(gettimeofday tv_interval);
+use Getopt::Long;
+
+use constant USAGEMSG    =>    <<USAGE;
+Usage: getColumns [options] DatabaseName.TableName
+Options:
+        --create <ClassName>    ClassName
+        --verbose                verbose messages
+USAGE
+
+my ($CLASSNAME, $WITH_LIST);
+GetOptions (
+    'create=s' => \$CLASSNAME,
+    'verbose'  => \$VERBOSE,
+);
+
+use constant JKZDBSKELTON => './SkelJKZDB.skel';
+use constant JKZMODELDIR  => '../../MyClass/JKZDB';
+
+my $table;
+die USAGEMSG unless  $table = $ARGV[0];
+chomp ($table);
+chomp ($CLASSNAME);
+
+my $time_begins = [gettimeofday]; 
+my $dbh         = MyClass::UsrWebDB::connect( {
+                     dbaccount => $cfg->param('DATABASE_USER'),
+                     dbpasswd  => $cfg->param('DATABASE_PASSWORD'),
+                     dbname    => $cfg->param('DATABASE_NAME'),
+                  } );
+
+my $aryref      = $dbh->selectall_arrayref("SHOW COLUMNS FROM " . $table . ";") ;
+my $cnt         = 0;
+my $GENSQL      = {};
+
+$GENSQL->{PROGRAMNAME}   = __FILE__;
+$GENSQL->{DATABASETABLE} = $table;
+$GENSQL->{CREATE}        = localtime(time);
+
+print "\n[ BEGINS Analyzing : " . localtime(time) . " ] \n";
+print "\n========> " . $table . " Options : Creating  " . $CLASSNAME . " With Listing :" . $WITH_LIST;
+
+my @operators = ('!=', 'ne');
+my (@cols, @colsSql, @colsHolder, @colsList);
+foreach my $column_key (@{$aryref}) {
+    ++$cnt;
+    ## primary key
+    $GENSQL->{PRIMARYKEY} = $column_key->[0] if $column_key->[3] eq 'PRI';
+    $GENSQL->{SETCOLUMNS} .= '$self->{columns}->{' . $column_key->[0] . '}';
+    $GENSQL->{SETCOLUMNS} .= ','."\n" unless $#{$aryref}<$cnt;
+
+    push @cols, $GENSQL->{SETCOLUMNS};
+
+    ## operator
+    my $operator = uc($column_key->[1]) =~ /INT/ ? $operators[0] : $operators[1];
+
+## Modified 2009/09/29 BEGIN
+    $GENSQL->{INSERTCOLUMNS} .= sprintf('        push( @{ $sqlref->[0] }, "%s" ), push( @{ $sqlref->[1] }, "?" ), push( @{ $sqlref->[2] }, $param->{%s} ) if $param->{%s} %s "";', $column_key->[0], $column_key->[0], $column_key->[0], $operator)
+                             . "\n"
+                             ;
+## Modified 2009/09/29 END
+
+    $GENSQL->{SETLISTINGCOLUMNS} .=  '$self->{columnslist}->{' . $column_key->[0] . '}->[$i] = $aryref->[$i]->['
+                              . ($cnt-1)
+                              . '];';
+
+    $GENSQL->{SETLISTINGCOLUMNS} .=  "\n" unless $#{$aryref} == $cnt-1;
+    push @colsList, $GENSQL->{SETLISTINGCOLUMNS};
+}
+
+$dbh->disconnect();
+
+unless (defined($CLASSNAME)) {
+    my $time_ends = [gettimeofday];
+    my $time_spent =  tv_interval $time_begins, $time_ends;
+    print "[ TOTAL TIMES : " . $time_spent . " ]\n";
+    exit();
+}
+
+$GENSQL->{CLASSNAME} = $CLASSNAME;
+
+my ($skelton, $model, $listingmodel);
+
+$CLASSNAME =~ s!^([^\.].*?::)(.*?)::(.*?)$!$3!;
+
+print "\n================> NOW BEGINS Creating ClassFile\n\n";
+local $/;
+local *F;
+open (F, "<". JKZDBSKELTON . "\0") or warn JKZDBSKELTON, " $! \n";
+$skelton = <F>;
+close (F);
+
+$skelton =~ s{ __(.*?)__ }{ exists ($GENSQL->{$1}) ? $GENSQL->{$1} : ""}gex;
+
+print $skelton if $VERBOSE;
+
+## ここでModel生成する。JKZのDBディレクトリに生成できるようにする。
+$model = JKZMODELDIR . '/' . $CLASSNAME . '.pm';
+open (W,">$model") or die "fuck \n";
+print W $skelton;
+close (W);
+
+
+exit();

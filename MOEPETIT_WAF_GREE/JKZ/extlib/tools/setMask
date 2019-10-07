@@ -1,0 +1,62 @@
+#!/bin/sh
+
+#******************************************************
+# @desc		set permissions to directories and
+# 			cgi files which must be executable
+# @package	setMask
+# @access	public
+# @author	Iwahase Ryo
+# @create	2007/08/09
+# @version	1.00
+#******************************************************
+
+if [ $# -lt 1 ];
+then 
+	DirPath=$(pwd)	
+else
+	DirPath=$1
+
+	if [ ! -d $DirPath ];
+	then
+	echo "Directory $DirPath does not exist"
+	exit 0
+	fi
+fi
+
+STR='>>>'
+
+## cache,cachesのディレクトリ権限の設定
+echo
+echo "${STR}${STR} Search directories: CACHES CACHE"
+CountOfSearch=$(find $DirPath -type d -and -name cache* | wc -l)
+echo "${STR}${STR}${STR} $CountOfSearch directories has found"
+echo "${STR}${STR}${STR}${STR} Change permissions to 777"
+#find $DirPath -type d -and -name cache* -exec chmod -v -R a+wrx {} \;
+unset CountOfSearch
+
+## filesのディレクトリ権限の設定
+echo
+echo "${STR}${STR} Search directories: FILES"
+CountOfSearch=$(find $DirPath -type d -and -name files | wc -l)
+echo "${STR}${STR}${STR} $CountOfSearch directories has found"
+echo "${STR}${STR}${STR}${STR} Change permissions to 777"
+#find $DirPath -type d -and -name files -exec chmod -v -R a+wrx {} \;
+unset CountOfSearch
+
+## templates_cのディレクトリ権限の設定
+echo
+echo "${STR}${STR} Search directories: TEMPLATES_C"
+CountOfSearch=$(find $DirPath -type d -and -name templates_c | wc -l)
+echo "${STR}${STR}${STR} $CountOfSearch directories has found"
+echo "${STR}${STR}${STR}${STR} Change permissions to 777"
+#find $DirPath -type d -and -name templates_c -exec chmod -v -R a+wrx {} \;
+unset CountOfSearch
+
+## cgiファイルの実行権限の設定(EnterpriseBlog及びMTE)
+echo
+echo "${STR}${STR} Search files: files extension with CGI"
+CountOfSearch=$(find $DirPath -type f -and -name *\.cgi | wc -l)
+echo "${STR}${STR}${STR} $CountOfSearch files has found"
+echo "${STR}${STR}${STR}${STR} Change permissions to 755"
+#find $DirPath -type f -and -name *\.cgi -exec chmod -v u=wrx,go=rx {} \;
+unset CountOfSearch

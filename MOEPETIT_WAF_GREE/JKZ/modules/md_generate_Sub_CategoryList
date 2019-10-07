@@ -1,0 +1,132 @@
+#!/usr/bin/perl
+
+#******************************************************
+# @desc        サブカテゴリリストオブジェクトの生成モジュール
+#            OBJECTには配列で格納
+#            categorym_id    subcategory_id
+#            [
+#                            [
+#                                        { categorym_id
+#                                          sucategory_id
+#                                          category_name
+#                                          subcategory_name
+#                                          status_flag
+#                                         },
+#                            ],
+#            ],
+#
+# @package    md_generate_Sub_CategoryList
+# @author    Iwahase Ryo
+# @create    2011/03/03
+# @version    
+#******************************************************
+
+use strict;
+use vars qw($include_path $cfg);
+
+BEGIN {
+    ## クラスのインクルードパスを取得するための処理
+    require Cwd;
+    my $pwd = Cwd::getcwd();
+    ($include_path = $pwd) =~ s!/modules!!;
+    unshift @INC, $include_path;
+
+    my $config = sprintf("%s/conf/envconf.cfg",$include_path);
+
+    require MyClass::Config;
+    $cfg = MyClass::Config->new($config);
+
+}
+
+use MyClass::UsrWebDB;
+use MyClass::WebUtil;
+
+#*******************************
+# cronで1日一回実行させる。
+# 集計してデータをシリアライズして保存
+#*******************************
+
+## 各カテゴリによって実行。サイトによってはカテゴリだけの場合があるから
+my $EXISTS_CATEGORY      = 1;
+my $EXISTS_SUBCATEGORY   = undef;
+my $EXISTS_SMALLCATEGORY = undef;
+
+## シリアライズしたデータオブジェクト
+my $category_objectfile                      = $cfg->param('CATEGORYLIST_OBJ');
+my $subcategory_objectfile                   = $cfg->param('SUBCATEGORYLIST_OBJ');
+my $subcategory_group_by_category_objectfile = $cfg->param('SUBCATEGORYLIST_BY_CATEGORY_OBJ');
+
+my $dbh = MyClass::UsrWebDB::connect({
+              dbaccount => $cfg->param('DATABASE_USER'),
+              dbpasswd  => $cfg->param('DATABASE_PASSWORD'),
+              dbname    => $cfg->param('DATABASE_NAME'),
+          });
+$dbh->do('set names sjis');
+
+my $sql;
+my $aryref;
+my $obj_c;
+my $obj_sc;
+
+# 同一サブカテゴリの小カテゴリ subcategoryでまとめる
+my $obj_sc_byc;
+
+my @reportsql;
+
+## カテゴリから開始
+if (defined($EXISTS_CATEGORY)) {
+	$sql    = "SELECT category_id, category_name, status_flag FROM tCategoryM;";
+	$aryref = $dbh->selectall_arrayref($sql, { Columns => {} });
+
+	foreach (@{$aryref}) {
+    	$obj_c->[$_->{category_id}]->{category_id}     = $_->{category_id};
+    	$obj_c->[$_->{category_id}]->{category_name} = $_->{category_name};
+    	$obj_c->[$_->{category_id}]->{status_flag}     = $_->{status_flag};
+	}
+
+	push(@reportsql, $sql);
+}
+
+
+## サブカテゴリ
+if (defined($EXISTS_SUBCATEGORY)) {
+	$sql    = "SELECT s.categorym_id, s.subcategory_id, s.subcategory_name, s.category_name, s.status_flag FROM tSubCategoryM s;";
+	$aryref = $dbh->selectall_arrayref($sql, { Columns => {} });
+
+	foreach (@{$aryref}) {
+    	$obj_sc->[$_->{subcategory_id}]->{category_id}      = $_->{categorym_id};
+    	$obj_sc->[$_->{subcategory_id}]->{subcategory_id}   = $_->{subcategory_id};
+    	$obj_sc->[$_->{subcategory_id}]->{category_name}    = $_->{category_name};
+    	$obj_sc->[$_->{subcategory_id}]->{subcategory_name} = $_->{subcategory_name};
+    	$obj_sc->[$_->{subcategory_id}]->{status_flag}      = $_->{status_flag};
+
+    	#********************************
+    	# category_idグルーピング
+    	#  c_id   sc_id  hash
+    	# [       [        {}  ]  ]
+    	#
+    	#********************************
+    	$obj_sc_byc->[$_->{categorym_id}]->[$_->{subcategory_id}]->{category_id}      = $_->{categorym_id};
+    	$obj_sc_byc->[$_->{categorym_id}]->[$_->{subcategory_id}]->{subcategory_id}   = $_->{subcategory_id};
+    	$obj_sc_byc->[$_->{categorym_id}]->[$_->{subcategory_id}]->{category_name}    = $_->{category_name};
+    	$obj_sc_byc->[$_->{categorym_id}]->[$_->{subcategory_id}]->{subcategory_name} = $_->{subcategory_name};
+    	$obj_sc_byc->[$_->{categorym_id}]->[$_->{subcategory_id}]->{status_flag}      = $_->{status_flag};
+
+	}
+
+	push(@reportsql, $sql);
+}
+
+$dbh->disconnect();
+
+eval {
+    MyClass::WebUtil::publishObj({ file=>$category_objectfile, obj=>$obj_c }) if $EXISTS_CATEGORY;
+    MyClass::WebUtil::publishObj({ file=>$subcategory_objectfile, obj=>$obj_sc }) if $EXISTS_SUBCATEGORY;
+    MyClass::WebUtil::publishObj({ file=>$subcategory_group_by_category_objectfile, obj=>$obj_sc_byc }) if $EXISTS_SUBCATEGORY;
+};
+
+if ($@) {
+    warn " Fail Creating Object files $@ \n";
+}
+
+exit();

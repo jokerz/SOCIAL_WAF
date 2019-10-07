@@ -1,0 +1,136 @@
+#!/usr/bin/perl
+
+#******************************************************
+# @desc		有効コンテンツの生成モジュール コンテンツ全リストも生成
+#			OBJECTには配列で格納
+#			有効なコンテンツだけを格納します。配列の順はcontents_id DESC
+#            [
+#               { contents_id,latest_flag,recommend_flag,name,name_kana,personality,appearance,grade,
+#                 bloodtype,year_of_birth,month_of_birth,date_of_birth,constellation,hobby,message,
+#                 contentsimage_id,painter,stopwatch_id
+#               },
+#            ]
+#
+#           全コンテンツリストの配列はcontents_id順に格納 これはコンテンツIDをキーにデータを取得できる
+#
+#
+# @package	md_generate_ActiveContentsList
+# @author	Iwahase Ryo
+# @create	2011/04/30
+# @version	
+#******************************************************
+
+use strict;
+use vars qw($include_path $cfg);
+
+BEGIN {
+    ## クラスのインクルードパスを取得するための処理
+    require Cwd;
+    my $pwd = Cwd::getcwd();
+    ($include_path = $pwd) =~ s!/modules!!;
+    unshift @INC, $include_path;
+
+    my $config = sprintf("%s/conf/envconf.cfg",$include_path);
+
+    require MyClass::Config;
+    $cfg = MyClass::Config->new($config);
+
+}
+
+use MyClass::UsrWebDB;
+use MyClass::WebUtil;
+
+#*******************************
+# 管理画面でコンテンツ登録時実行する
+# 
+#*******************************
+
+## シリアライズしたデータオブジェクト
+my $activecontents_objectfile   = $cfg->param('ACTIVECONTENTSLIST_OBJ');
+my $contents_objectfile         = $cfg->param('CONTENTSLIST_OBJ');
+
+my $sql;
+
+$sql = "SELECT contents_id
+,status_flag
+,latest_flag
+,recommend_flag
+,sum_xy_value
+,MAKE_SET(sum_xy_value, 1,2,4,8,16,32,64) AS make_set_xy_value
+,name
+,name_kana
+,personality
+,appearance
+,grade
+,bloodtype
+,year_of_birth
+,month_of_birth
+,date_of_birth
+,constellation
+,hobby
+,message
+,contentsimage_id
+,painter
+,stopwatch_id
+ FROM tContentsM
+ WHERE status_flag=2
+ ORDER BY contents_id DESC
+";
+
+my $dbh = MyClass::UsrWebDB::connect({
+              dbaccount => $cfg->param('DATABASE_USER'),
+              dbpasswd  => $cfg->param('DATABASE_PASSWORD'),
+              dbname    => $cfg->param('DATABASE_NAME'),
+          });
+$dbh->do('set names sjis');
+
+
+# 有効なコンテンツだけ
+my $aryref1 = $dbh->selectall_arrayref( $sql, { Columns => {} } );
+
+$sql = "SELECT contents_id
+,status_flag
+,latest_flag
+,recommend_flag
+,sum_xy_value
+,MAKE_SET(sum_xy_value, 1,2,4,8,16,32,64) AS make_set_xy_value
+,name
+,name_kana
+,personality
+,appearance
+,grade
+,bloodtype
+,year_of_birth
+,month_of_birth
+,date_of_birth
+,constellation
+,hobby
+,message
+,contentsimage_id
+,painter
+,stopwatch_id
+ FROM tContentsM
+ ORDER BY contents_id DESC
+";
+
+
+my $object;
+# 全コンテンツ コンテンツIDを配列の順位する
+my $aryref2 = $dbh->selectall_arrayref( $sql, { Columns => {} } );
+
+foreach my $ref (@{ $aryref2 }) {
+    map { $object->[$ref->{contents_id}]->{$_} = $ref->{$_} } keys %{ $ref };
+}
+
+$dbh->disconnect();
+
+eval {
+    MyClass::WebUtil::publishObj({ file=>$activecontents_objectfile, obj=>$aryref1 });
+    MyClass::WebUtil::publishObj({ file=>$contents_objectfile, obj=>$object });
+};
+if ($@) {
+    print " FAIL CREATING OBJECT $@ \n";
+}
+
+
+exit();
